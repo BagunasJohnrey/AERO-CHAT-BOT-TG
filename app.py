@@ -6,6 +6,8 @@ import openmeteo_requests
 import requests_cache
 import re
 import asyncio
+import urllib.request
+import json
 from datetime import datetime, timedelta
 from retry_requests import retry
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -753,17 +755,66 @@ async def ask_ai(question: str) -> str:
     )
 
 async def get_climate_events(city: Optional[str] = None) -> str:
-    """Get natural disaster events from AI"""
-    prompt = (
-        f"List 3 recent or upcoming natural disaster events (typhoons, earthquakes, floods, etc.) affecting {city} with dates and brief descriptions, maximum 200 words."
-        if city else
-        "List 3 recent or upcoming major natural disaster events (typhoons, earthquakes, floods, etc.) worldwide with dates and brief descriptions, maximum 200 words."
-    )
-    return "⚠️ *Natural Disaster Events* ⚠️\n\n" + await AIService.fetch_ai_response(
-        prompt=prompt,
-        system_message="You're a disaster response expert. Provide recent or upcoming natural disaster events with dates and impacts in clear bullet points, maximum 200 words. Focus on typhoons, earthquakes, floods and other natural disasters.",
-        max_tokens=1200
-    )
+    """Get climate-related news events from GNews API using urllib"""
+    try:
+        # Get API key from environment variables
+        api_key = os.getenv("GNEWS_API_KEY") or "ebd3c240d560cee99713aac96e690a32"
+        
+        # Build base URL and query
+        base_url = "https://gnews.io/api/v4/search"
+        query = 'climate OR weather OR disaster OR flood OR typhoon OR earthquake'
+        
+        if city:
+            query += f' AND {city}'
+        
+        url = f"{base_url}?q={urllib.parse.quote(query)}&lang=en&max=3&apikey={api_key}"
+        
+        # Make the API request
+        with urllib.request.urlopen(url) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            articles = data.get("articles", [])
+            
+            if not articles:
+                return "🌍 No climate news found currently. Check back later for updates!"
+            
+            # Format the news articles
+            events_msg = "🌦️ *Climate News Updates*\n\n"
+            for article in articles[:3]:  # Limit to 3 articles
+                title = article.get('title', 'No title')
+                description = article.get('description', '')
+                source = article.get('source', {}).get('name', 'Unknown source')
+                published_at = article.get('publishedAt', '')
+                url = article.get('url', '#')
+                
+                # Format date if available
+                date_str = ""
+                if published_at:
+                    try:
+                        date_obj = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ")
+                        date_str = date_obj.strftime("%b %d, %Y")
+                    except ValueError:
+                        date_str = published_at[:10]  # Just show YYYY-MM-DD if parsing fails
+                
+                events_msg += (
+                    f"📰 *{title}*\n"
+                    f"{description}\n"
+                    f"📡 Source: {source}\n"
+                )
+                if date_str:
+                    events_msg += f"📅 Date: {date_str}\n"
+                events_msg += f"🔗 [Read more]({url})\n\n"
+            
+            return events_msg
+            
+    except urllib.error.URLError as e:
+        logger.error(f"GNews API request failed: {str(e)}")
+        return "⚠️ Could not fetch climate news. Please try again later."
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding API response: {str(e)}")
+        return "⚠️ Error processing news data. Please try again."
+    except Exception as e:
+        logger.error(f"Error processing climate news: {str(e)}")
+        return "⚠️ An error occurred while fetching climate news."
 
 async def get_water_tips(region: Optional[str] = None) -> str:
     """Get water saving tips from AI"""
