@@ -217,160 +217,152 @@ class AIService:
 
 # Weather Service
 class WeatherService:
-    """Improved weather service with better error handling and caching"""
+    """Weather service using Kaiz Weather API"""
     
     @staticmethod
-    async def get_full_location(city: str) -> str:
-        """Get clean location string with AI assistance"""
+    async def get_weather_data(city: str) -> Optional[Dict[str, Any]]:
+        """Fetch weather data from Kaiz Weather API"""
         try:
-            prompt = f"Return ONLY the location in format 'City, Country'. Be concise. Input: {city}"
-            system_msg = "You are a location formatting assistant. Return only the properly formatted location."
+            clean_city = clean_input(city.replace(' ', '+'))  # Format for URL
+            url = f"https://kaiz-apis.gleeze.com/api/weather?q={clean_city}"
             
-            location = await AIService.fetch_ai_response(
-                prompt=prompt,
-                system_message=system_msg,
-                max_tokens=50,
-                model="gpt-4o"
-            )
-            
-            # Clean up the response
-            location = location.strip().replace('"', '').replace("'", "")
-            if location.lower().startswith("input:"):
-                location = location[6:].strip()
-                
-            return location if location else city
-            
-        except Exception as e:
-            logger.error(f"Location formatting error: {str(e)}")
-            return city
-    
-    @staticmethod
-    async def get_coordinates(city: str) -> Tuple[Optional[float], Optional[float]]:
-        """Get coordinates with multiple fallback methods"""
-        try:
-            clean_city = clean_input(city)
-            
-            # Try with Open-Meteo first
-            url = f"https://geocoding-api.open-meteo.com/v1/search?name={clean_city}&count=1"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            if data.get('results'):
-                result = data['results'][0]
-                return result['latitude'], result['longitude']
+            if not data or "0" not in data:
+                return None
                 
-            # Fallback to Nominatim if Open-Meteo fails
-            url = f"https://nominatim.openstreetmap.org/search?q={clean_city}&format=json&limit=1"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and isinstance(data, list):
-                return float(data[0]['lat']), float(data[0]['lon'])
-                
-            return None, None
+            return data["0"]
             
         except Exception as e:
-            logger.error(f"Geocoding error for '{city}': {str(e)}")
-            return None, None
-    
-    @staticmethod
-    def fetch_weather(lat: float, lon: float) -> Optional[Dict[str, Any]]:
-        """Fetch weather data with better error handling"""
-        try:
-            url = "https://api.open-meteo.com/v1/forecast"
-            params = {
-                "latitude": lat,
-                "longitude": lon,
-                "current": ["temperature_2m", "relative_humidity_2m", "precipitation", 
-                            "weather_code", "surface_pressure", "wind_speed_10m", 
-                            "wind_direction_10m", "uv_index"],
-                "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min",
-                         "precipitation_sum", "uv_index_max"],
-                "timezone": "auto"
-            }
-            
-            response = openmeteo.weather_api(url, params=params)[0]
-            current = response.Current()
-            daily = response.Daily()
-            
-            return {
-                "current": {
-                    "temp": current.Variables(0).Value(),
-                    "humidity": current.Variables(1).Value(),
-                    "precip": current.Variables(2).Value(),
-                    "weather_code": current.Variables(3).Value(),
-                    "pressure": current.Variables(4).Value(),
-                    "wind_speed": current.Variables(5).Value(),
-                    "wind_dir": current.Variables(6).Value(),
-                    "uv": current.Variables(7).Value()
-                },
-                "daily": {
-                    "weather_code": daily.Variables(0).ValuesAsNumpy(),
-                    "temp_max": daily.Variables(1).ValuesAsNumpy(),
-                    "temp_min": daily.Variables(2).ValuesAsNumpy(),
-                    "precip_sum": daily.Variables(3).ValuesAsNumpy(),
-                    "uv_max": daily.Variables(4).ValuesAsNumpy()
-                },
-                "timezone": response.Timezone()
-            }
-            
-        except Exception as e:
-            logger.error(f"Weather fetch error: {str(e)}")
+            logger.error(f"Weather API error for '{city}': {str(e)}")
             return None
     
     @staticmethod
-    def get_weather_description(code: int) -> str:
-        """Convert weather code to description"""
+    def get_weather_description(skycode: str) -> str:
+        """Convert skycode to description"""
         codes = {
-            0: "☀️ Clear sky",
-            1: "🌤️ Mainly clear",
-            2: "⛅ Partly cloudy",
-            3: "☁️ Overcast",
-            45: "🌫️ Fog",
-            48: "❄️ Depositing rime fog",
-            51: "🌧️ Light drizzle",
-            53: "🌧️ Moderate drizzle",
-            55: "🌧️ Dense drizzle",
-            56: "🌧️ Freezing drizzle",
-            57: "🌧️ Dense freezing drizzle",
-            61: "🌧️ Slight rain",
-            63: "🌧️ Moderate rain",
-            65: "🌧️ Heavy rain",
-            66: "🌨️ Freezing rain",
-            67: "🌨️ Heavy freezing rain",
-            71: "❄️ Slight snow",
-            73: "❄️ Moderate snow",
-            75: "❄️ Heavy snow",
-            77: "❄️ Snow grains",
-            80: "🌧️ Slight rain showers",
-            81: "🌧️ Moderate rain showers",
-            82: "🌧️ Violent rain showers",
-            85: "❄️ Slight snow showers",
-            86: "❄️ Heavy snow showers",
-            95: "⛈️ Thunderstorm",
-            96: "⛈️ Thunderstorm with hail",
-            99: "⛈️ Heavy thunderstorm with hail"
+            "0": "☀️ Clear sky",
+            "1": "🌤️ Mostly sunny",
+            "2": "⛅ Partly cloudy",
+            "3": "☁️ Mostly cloudy",
+            "4": "🌧️ Light rain",
+            "5": "🌧️ Rain",
+            "6": "🌧️ Heavy rain",
+            "7": "⛈️ Thunderstorm",
+            "8": "🌨️ Snow",
+            "9": "🌫️ Fog",
+            "34": "🌤️ Mostly sunny"
         }
-        return codes.get(code, "Unknown weather conditions")
+        return codes.get(skycode, f"Unknown weather (code: {skycode})")
     
     @staticmethod
-    def get_uv_level(uv: float) -> Tuple[str, str]:
-        """Get UV level and protection advice"""
-        uv = float(uv)
-        if uv < 3:
-            return "Low", "🟢 No protection needed"
-        elif uv < 6:
-            return "Moderate", "🟡 Wear sunscreen and a hat"
-        elif uv < 8:
-            return "High", "🟠 Protection required - seek shade during midday"
-        elif uv < 11:
-            return "Very High", "🔴 Extra protection needed - avoid sun exposure"
+    def get_heat_advisory(temp: float, feelslike: float) -> Tuple[str, str]:
+        """Get heat advisory based on temperature and feels-like"""
+        temp_diff = float(feelslike) - float(temp)
+        temp = float(temp)
+        
+        if temp >= 40:
+            return "Extreme Heat Danger", "🔥 Extreme heat warning! Avoid outdoor activities and stay hydrated"
+        elif temp >= 35:
+            if temp_diff > 5:
+                return "High Heat & Humidity", "🥵 Very hot and humid. Limit outdoor exposure"
+            return "High Heat", "☀️ Very hot - stay in shade and drink water"
+        elif temp >= 30:
+            if temp_diff > 5:
+                return "Hot & Humid", "😓 Hot and sticky - take frequent breaks in shade"
+            return "Warm", "☀️ Warm weather - stay hydrated"
         else:
-            return "Extreme", "🚨 Avoid being outside during midday"
+            return "Mild", "😌 Comfortable temperature"
+
+    @staticmethod
+    def format_simple_forecast(forecasts: List[Dict[str, Any]]) -> str:
+        """Simplified forecast format with emojis"""
+        forecast_lines = []
+        for forecast in forecasts[:5]:
+            day = forecast['shortday']
+            conditions = forecast['skytextday']
+            emoji = "☀️" if "sunny" in conditions.lower() else \
+                    "🌧️" if "rain" in conditions.lower() else \
+                    "⛅" if "cloud" in conditions.lower() else "🌤️"
+            
+            forecast_lines.append(
+                f"{emoji} {day}: {forecast['high']}°C/{forecast['low']}°C "
+                f"({conditions}, {forecast['precip']}% rain)"
+            )
+        return "\n".join(forecast_lines)
 
 # Handlers
+async def weather_location_handler(update: Update, context: CallbackContext) -> int:
+    """Handle weather location input with 5-day forecast"""
+    if update.message:
+        city = clean_input(update.message.text)
+        
+        if not validate_city_name(city):
+            await update.message.reply_text(
+                "⚠️ Please enter a valid city name (max 50 characters).",
+                reply_markup=back_button()
+            )
+            return WEATHER_LOCATION
+            
+        await show_typing(context, update.message.chat_id)
+        
+        # Get weather data from Kaiz API
+        weather_data = await WeatherService.get_weather_data(city)
+        
+        if not weather_data:
+            await update.message.reply_text(
+                f"❌ Couldn't find weather data for '{city}'. Try a nearby city.",
+                reply_markup=back_button()
+            )
+            return WEATHER_LOCATION
+            
+        # Store weather data
+        context.user_data['weather_data'] = weather_data
+            
+        # Extract data from response
+        location = weather_data["location"]["name"]
+        current = weather_data["current"]
+        forecasts = weather_data["forecast"]
+        
+        # Format current weather
+        weather_msg = (
+            f"🌤️ *Current Weather in {location}*\n"
+            f"📅 {current['day']}, {current['date']}\n"
+            f"⏰ {current['observationtime']}\n\n"
+            f"{current['skytext']}\n"
+            f"🌡️ Temperature: {current['temperature']}°C (Feels like {current['feelslike']}°C)\n"
+            f"💧 Humidity: {current['humidity']}%\n"
+            f"🌬️ Wind: {current['winddisplay']}\n\n"
+        )
+        
+        # Add heat advisory
+        advisory, advice = WeatherService.get_heat_advisory(
+            current["temperature"], 
+            current["feelslike"]
+        )
+        weather_msg += f"⚠️ *{advisory}*\n{advice}\n\n"
+        
+        # Replace the table section in weather_location_handler with:
+        weather_msg += "🌤️ *5-Day Weather Forecast:*\n"
+        weather_msg += WeatherService.format_simple_forecast(forecasts)
+        
+        # Create simplified keyboard options
+        keyboard = [
+            [InlineKeyboardButton("🔄 Refresh Weather", callback_data='weather')],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data='back')]
+        ]
+        
+        await update.message.reply_text(
+            weather_msg,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return MAIN_MENU
+        
+    return MAIN_MENU
+
 async def start(update: Update, context: CallbackContext) -> int:
     """Start command handler that works on all devices"""
     user = update.effective_user
@@ -534,64 +526,153 @@ async def main_menu_handler(update: Update, context: CallbackContext) -> int:
         
     return MAIN_MENU
 
-async def weather_location_handler(update: Update, context: CallbackContext) -> int:
-    """Handle weather location input with option to get weather again"""
-    if update.message:
-        city = clean_input(update.message.text)
+# async def weather_location_handler(update: Update, context: CallbackContext) -> int:
+#     """Handle weather location input with option to get weather again"""
+#     if update.message:
+#         city = clean_input(update.message.text)
         
-        if not validate_city_name(city):
-            await update.message.reply_text(
-                "⚠️ Please enter a valid city name (max 50 characters).",
-                reply_markup=back_button()
-            )
-            return WEATHER_LOCATION
+#         if not validate_city_name(city):
+#             await update.message.reply_text(
+#                 "⚠️ Please enter a valid city name (max 50 characters).",
+#                 reply_markup=back_button()
+#             )
+#             return WEATHER_LOCATION
             
-        await show_typing(context, update.message.chat_id)
+#         await show_typing(context, update.message.chat_id)
         
-        # Get location details
-        full_location = await WeatherService.get_full_location(city)
-        lat, lon = await WeatherService.get_coordinates(full_location)
+#         # Get weather data from Kaiz API
+#         weather_data = await WeatherService.get_weather_data(city)
         
-        if not lat or not lon:
-            await update.message.reply_text(
-                f"❌ Couldn't find weather data for '{full_location}'. Try a nearby city.",
-                reply_markup=back_button()
-            )
-            return WEATHER_LOCATION
+#         if not weather_data:
+#             await update.message.reply_text(
+#                 f"❌ Couldn't find weather data for '{city}'. Try a nearby city.",
+#                 reply_markup=back_button()
+#             )
+#             return WEATHER_LOCATION
             
-        # Get weather data
-        weather = WeatherService.fetch_weather(lat, lon)
-        if not weather:
-            await update.message.reply_text(
-                f"⚠️ Weather service unavailable for {full_location}.",
-                reply_markup=back_button()
-            )
-            return WEATHER_LOCATION
+#         # Store weather data for potential next day forecast request
+#         context.user_data['weather_data'] = weather_data
             
-        # Format current weather
-        current = weather['current']
-        weather_desc = WeatherService.get_weather_description(current['weather_code'])
-        uv_level, uv_advice = WeatherService.get_uv_level(current['uv'])
+#         # Extract data from response
+#         location = weather_data["location"]["name"]
+#         current = weather_data["current"]
+#         today_forecast = weather_data["forecast"][0]
+#         tomorrow_forecast = weather_data["forecast"][1] if len(weather_data["forecast"]) > 1 else None
         
-        weather_msg = (
-            f"🌦️ *Weather for {full_location}*\n\n"
-            f"{weather_desc}\n"
-            f"🌡️ Temperature: *{current['temp']:.1f}°C*\n"
-            f"💧 Humidity: *{current['humidity']}%*\n"
-            f"🌬️ Wind: *{current['wind_speed']:.2f} km/h* from *{current['wind_dir']:.2f}°*\n"
-            f"☔ Precipitation: *{current['precip']:.2f} mm*\n"
-            f"☀️ UV Index: *{current['uv']:.1f} ({uv_level})*\n"
-            f"{uv_advice}\n\n"
-            f"Select an option below:"
-        )
+#         # Format weather message
+#         weather_msg = (
+#             f"🌤️ *Weather for {location}*\n\n"
+#             f"{current['skytext']}\n"
+#             f"🌡️ *Temperature:* {current['temperature']}°C (Feels like {current['feelslike']}°C)\n"
+#             f"💧 *Humidity:* {current['humidity']}%\n"
+#             f"🌬️ *Wind:* {current['winddisplay']}\n\n"
+#             f"📅 *Today's Forecast*\n"
+#             f"⬆️ High: {today_forecast['high']}°C | ⬇️ Low: {today_forecast['low']}°C\n"
+#             f"🌧️ Precipitation: {today_forecast['precip']}%\n"
+#             f"☀️ Conditions: {today_forecast['skytextday']}\n\n"
+#             f"⚠️ *Advisory:* Warm weather. Stay hydrated!"
+#         )
         
-        await update.message.reply_text(
-            weather_msg,
-            parse_mode="Markdown",
-            reply_markup=weather_menu()  # Now shows both weather again and back buttons
+#         # Create keyboard with options
+#         keyboard = [
+#             [
+#                 InlineKeyboardButton("🌦️ Get Weather Again", callback_data='weather'),
+#                 InlineKeyboardButton("📅 Tomorrow's Forecast", callback_data='tomorrow')
+#             ],
+#             [InlineKeyboardButton("🔙 Main Menu", callback_data='back')]
+#         ]
+        
+#         await update.message.reply_text(
+#             weather_msg,
+#             parse_mode="Markdown",
+#             reply_markup=InlineKeyboardMarkup(keyboard)
+#         )
+#         return MAIN_MENU
+        
+#     return MAIN_MENU
+
+async def tomorrow_forecast_handler(update: Update, context: CallbackContext) -> int:
+    """Handle request for tomorrow's forecast"""
+    query = update.callback_query
+    await query.answer()
+    
+    weather_data = context.user_data.get('weather_data')
+    if not weather_data or len(weather_data["forecast"]) < 2:
+        await query.edit_message_text(
+            text="⚠️ Tomorrow's forecast not available. Please request weather again.",
+            reply_markup=back_button()
         )
         return MAIN_MENU
-        
+    
+    location = weather_data["location"]["name"]
+    tomorrow = weather_data["forecast"][1]
+    
+    forecast_msg = (
+        f"📅 *Detailed Tomorrow's Forecast for {location}*\n\n"
+        f"📅 Date: {tomorrow['date']} ({tomorrow['day']})\n"
+        f"⬆️ Maximum Temperature: {tomorrow['high']}°C\n"
+        f"⬇️ Minimum Temperature: {tomorrow['low']}°C\n"
+        f"🌧️ Precipitation Chance: {tomorrow['precip']}%\n"
+        f"☀️ Expected Conditions: {tomorrow['skytextday']}\n\n"
+        f"🧭 Recommendations:\n"
+        f"- {'🌂 Carry an umbrella' if int(tomorrow['precip']) > 30 else 'No rain expected'}\n"
+        f"- {'🧴 Apply sunscreen' if 'sunny' in tomorrow['skytextday'].lower() else ''}\n"
+        f"- {'👕 Dress lightly' if int(tomorrow['high']) > 30 else '👔 Normal attire recommended'}"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🌦️ Current Weather", callback_data='weather')],
+        [InlineKeyboardButton("🔙 Main Menu", callback_data='back')]
+    ]
+    
+    await query.edit_message_text(
+        text=forecast_msg,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MAIN_MENU
+
+async def tomorrow_forecast_handler(update: Update, context: CallbackContext) -> int:
+    """Handle request for tomorrow's forecast"""
+    query = update.callback_query
+    await query.answer()
+    
+    weather_data = context.user_data.get('weather_data')
+    if not weather_data:
+        await query.edit_message_text(
+            text="⚠️ Weather data not available. Please request weather again.",
+            reply_markup=back_button()
+        )
+        return MAIN_MENU
+    
+    if len(weather_data["forecast"]) < 2:
+        await query.edit_message_text(
+            text="⚠️ Tomorrow's forecast not available.",
+            reply_markup=back_button()
+        )
+        return MAIN_MENU
+    
+    location = weather_data["location"]["name"]
+    tomorrow = weather_data["forecast"][1]
+    
+    forecast_msg = (
+        f"📅 *Tomorrow's Forecast for {location}*\n\n"
+        f"⬆️ High: {tomorrow['high']}°C | ⬇️ Low: {tomorrow['low']}°C\n"
+        f"🌧️ Precipitation: {tomorrow['precip']}%\n"
+        f"☀️ Conditions: {tomorrow['skytextday']}\n\n"
+        f"📅 Date: {tomorrow['date']} ({tomorrow['day']})"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🌦️ Get Weather Again", callback_data='weather')],
+        [InlineKeyboardButton("🔙 Main Menu", callback_data='back')]
+    ]
+    
+    await query.edit_message_text(
+        text=forecast_msg,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return MAIN_MENU
 
 async def ask_question_handler(update: Update, context: CallbackContext) -> int:
@@ -705,35 +786,67 @@ async def get_disaster_prep(disaster_type: str) -> str:
 PH_LAWS = {
     'law_waste': {
         "title": "RA 9003 – Ecological Solid Waste Management Act (2000)",
-        "summary": "Mandates proper waste segregation, recycling, and disposal.",
+        "summary": "Comprehensive legislation mandating proper segregation, recycling, composting, and disposal of solid waste through the establishment of Materials Recovery Facilities (MRFs) in every barangay.",
+        "key_provisions": [
+            "Mandatory segregation at source (household level)",
+            "Prohibition of open dumping and burning of waste",
+            "Establishment of sanitary landfills",
+            "Extended Producer Responsibility (EPR) for manufacturers"
+        ],
+        "scope": "Applies to all waste generators including households, institutions, commercial establishments, and industries",
         "irr": "DENR Administrative Order No. 2001-34",
-        "penalty": "Fines from ₱300 to ₱1,000 for individuals",
-        "imprisonment": "1 to 15 days community service",
+        "penalty": "Fines from ₱300 to ₱1,000 for individuals; ₱5,000 to ₱200,000 for establishments",
+        "imprisonment": "1 to 15 days community service for individuals; 1-6 years for serious violations",
+        "enforcement": "Local government units (LGUs) with DENR oversight",
         "link": "https://emb.gov.ph/wp-content/uploads/2015/09/RA-9003.pdf"
     },
     'law_water': {
         "title": "RA 9275 – Philippine Clean Water Act (2004)",
-        "summary": "Protects water bodies from pollution from land-based sources.",
+        "summary": "Comprehensive water quality management framework protecting all water bodies from land-based pollution sources including industries, commercial establishments, and agricultural activities.",
+        "key_provisions": [
+            "Wastewater charge system",
+            "Water quality management areas",
+            "Prohibition on discharging untreated wastewater",
+            "Mandatory wastewater treatment facilities"
+        ],
+        "scope": "Covers all water bodies: inland surface waters, ground water, coastal and marine waters",
         "irr": "DENR Administrative Order No. 2005-10",
-        "penalty": "Fines up to ₱200,000/day per violation",
-        "imprisonment": "Up to 10 years",
+        "penalty": "Fines up to ₱200,000/day per violation for serious offenses",
+        "imprisonment": "Up to 10 years for willful violations",
+        "enforcement": "DENR through Environmental Management Bureau (EMB)",
         "link": "https://emb.gov.ph/wp-content/uploads/2015/09/RA-9275.pdf"
     },
     'law_air': {
         "title": "RA 8749 – Philippine Clean Air Act (1999)",
-        "summary": "Aims to achieve and maintain clean air that meets national air quality standards.",
+        "summary": "National air quality management program that sets emission standards for mobile and stationary sources, and phases out ozone-depleting substances.",
+        "key_provisions": [
+            "Ban on leaded gasoline",
+            "Vehicle emission testing program",
+            "Industrial emission limits",
+            "Smoke Belching Reduction Program"
+        ],
+        "scope": "Regulates all potential air pollution sources including vehicles, factories, power plants, and open burning",
         "irr": "DENR Administrative Order No. 2000-81",
         "penalty": "Fines up to ₱100,000/day per violation",
-        "imprisonment": "Up to 6 years",
+        "imprisonment": "Up to 6 years for gross violations",
+        "enforcement": "DENR-EMB with LGU and DOTC/LTO coordination",
         "link": "https://emb.gov.ph/wp-content/uploads/2015/09/RA-8749.pdf"
     },
     'law_climate': {
         "title": "RA 9729 – Climate Change Act (2009)",
-        "summary": "Mainstreams climate change into government policy formulations.",
+        "summary": "Establishes the Climate Change Commission and mandates the formulation of the National Climate Change Action Plan (NCCAP) to mainstream climate change in policy formulation.",
+        "key_provisions": [
+            "Created the Climate Change Commission",
+            "National Framework Strategy on Climate Change",
+            "Local Climate Change Action Plans (LCCAPs)",
+            "People's Survival Fund for adaptation projects"
+        ],
+        "scope": "Whole-of-government approach covering mitigation and adaptation strategies",
         "irr": "DENR Administrative Order No. 2010-01",
-        "penalty": "As specified in respective provisions",
-        "imprisonment": "As specified in respective provisions",
-        "link": "https://climate.gov.ph/files/RA-9729.pdf"
+        "penalty": "Non-compliance may result in administrative sanctions (Sec. 19) including:\n• Suspension or cancellation of permits\n• Withholding of government benefits\n• Other appropriate penalties under existing laws",
+        "imprisonment": "Violations may be subject to penalties under:\n• Revised Penal Code\n• Other relevant environmental laws\n• Implementing rules of specific provisions",
+        "enforcement": "Climate Change Commission with all government agencies",
+        "link": "https://climate.emb.gov.ph/?page_id=68"
     }
 }
 
@@ -760,8 +873,8 @@ def main() -> None:
                 CallbackQueryHandler(main_menu_handler, pattern='^back$')
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],  # Added start as fallback
-        allow_reentry=True  # Allow users to re-enter the conversation
+        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],
+        allow_reentry=True
     )
 
     application.add_handler(conv_handler)
